@@ -1,0 +1,96 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+backend/.env/
+.venv/
+
+# =========================
+# Django
+# =========================
+*.log
+local_settings.py
+backend/db.sqlite3
+db.sqlite3-journal
+
+# Static & media
+staticfiles/
+media/
+
+# Migrations (если НЕ хочешь хранить миграции)
+# */migrations/
+# !*/migrations/__init__.py
+
+# =========================
+# Environment variables
+# =========================
+backend/.env
+.env.*
+!.env.example
+
+# =========================
+# PostgreSQL
+# =========================
+postgres_data/
+pgdata/
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+*.pid
+
+# =========================
+# PyCharm / VSCode
+# =========================
+.idea/
+.vscode/
+
+# =========================
+# macOS
+# =========================
+.DS_Store
+
+# =========================
+# Linux
+# =========================
+*.swp
+
+# =========================
+# Testing
+# =========================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# =========================
+# mypy
+# =========================
+.mypy_cache/
+
+# =========================
+# Ruff / Black
+# =========================
+.ruff_cache/
+
+# =========================
+# Celery
+# =========================
+celerybeat-schedule
+
+# =========================
+# AIogram FSM storage
+# =========================
+*.session
+
+# =========================
+# Build files
+# =========================
+dist/
+build/
+*.egg-info/
