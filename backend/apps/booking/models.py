@@ -17,6 +17,7 @@ class Service(models.Model):
     name = models.CharField(max_length=100, verbose_name='Название услуги')
     price = models.DecimalField(decimal_places=2, max_digits=10, verbose_name='Цена')
     duration = models.DurationField(verbose_name='Длительность')
+    is_active = models.BooleanField(default=True,verbose_name='Активна')
 
     class Meta:
         verbose_name = 'Услуга'
