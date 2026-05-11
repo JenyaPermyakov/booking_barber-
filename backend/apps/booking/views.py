@@ -7,8 +7,8 @@ from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Booking, Service
-from .serializers import BookingSerializer, ServiceSerializer
+from .models import Booking, Client, Service
+from .serializers import BookingSerializer, ClientSerializer, ServiceSerializer
 
 
 class ServiceListAPIView(ListAPIView):
@@ -136,6 +136,32 @@ def my_booking(request):
         )
 
     serializer = BookingSerializer(booking)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+def client_by_telegram(request):
+    telegram_id = request.query_params.get("telegram_id")
+
+    if not telegram_id:
+        return Response(
+            {
+                "error": "telegram_id обязателен."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        client = Client.objects.get(telegram_id=telegram_id)
+    except Client.DoesNotExist:
+        return Response(
+            {
+                "detail": "Клиент не найден."
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    serializer = ClientSerializer(client)
     return Response(serializer.data)
 
 
