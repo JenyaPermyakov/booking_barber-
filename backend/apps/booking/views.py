@@ -3,10 +3,90 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
+from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from .models import Booking
-from .serializers import BookingSerializer
+from .models import Booking, Service
+from .serializers import BookingSerializer, ServiceSerializer
+
+
+class ServiceListAPIView(ListAPIView):
+    queryset = Service.objects.all()
+    serializer_class = ServiceSerializer
+
+
+class AvailableSlotsAPIView(APIView):
+    def get(self, request):
+        date_str = request.query_params.get("date")
+        service_id = request.query_params.get("service_id")
+
+        if not date_str:
+            return Response(
+                {"error": "date обязателен."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not service_id:
+            return Response(
+                {"error": "service_id обязателен."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            selected_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return Response(
+                {"error": "Неверный формат даты. Используйте YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            service = Service.objects.get(id=service_id)
+        except Service.DoesNotExist:
+            return Response(
+                {"error": "Услуга не найдена."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        work_start = datetime.combine(selected_date, datetime.strptime("10:00", "%H:%M").time())
+        work_end = datetime.combine(selected_date, datetime.strptime("20:00", "%H:%M").time())
+
+        if timezone.is_naive(work_start):
+            work_start = timezone.make_aware(work_start, timezone.get_current_timezone())
+
+        if timezone.is_naive(work_end):
+            work_end = timezone.make_aware(work_end, timezone.get_current_timezone())
+
+        now = timezone.localtime()
+
+        slots = []
+        current_time = work_start
+
+        while current_time + service.duration <= work_end:
+            slot_end = current_time + service.duration
+
+            is_past = current_time < now + timedelta(minutes=30)
+
+            is_busy = Booking.objects.filter(
+                booking_date=selected_date,
+                status__in=[
+                    Booking.Status.PENDING,
+                    Booking.Status.CONFIRMED,
+                ],
+                booking_time__lt=slot_end.time(),
+            ).filter(
+                booking_time__gte=current_time.time()
+            ).exists()
+
+            if not is_past and not is_busy:
+                slots.append({
+                    "time": current_time.strftime("%H:%M")
+                })
+
+            current_time += timedelta(minutes=30)
+
+        return Response(slots)
 
 
 @api_view(["POST"])
@@ -45,7 +125,7 @@ def my_booking(request):
             Booking.Status.PENDING,
             Booking.Status.CONFIRMED,
         ]
-    ).order_by("date", "time").first()
+    ).order_by("booking_date", "booking_time").first()
 
     if not booking:
         return Response(
@@ -79,7 +159,10 @@ def cancel_booking(request, pk):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    booking_datetime = datetime.combine(booking.date, booking.time)
+    booking_datetime = datetime.combine(
+        booking.booking_date,
+        booking.booking_time
+    )
 
     if timezone.is_naive(booking_datetime):
         booking_datetime = timezone.make_aware(
@@ -89,7 +172,6 @@ def cancel_booking(request, pk):
 
     now = timezone.localtime()
 
-    # Правило: отмена минимум за 2 часа
     if booking_datetime < now + timedelta(hours=2):
         return Response(
             {

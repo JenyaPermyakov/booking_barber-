@@ -53,8 +53,8 @@ class BookingSerializer(serializers.ModelSerializer):
             "telegram_id",
             "client_name",
             "phone",
-            "date",
-            "time",
+            "booking_date",
+            "booking_time",
             "status",
         ]
         read_only_fields = [
@@ -66,11 +66,11 @@ class BookingSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         service = attrs["service"]
-        date = attrs["date"]
-        time = attrs["time"]
+        booking_date = attrs["booking_date"]
+        booking_time = attrs["booking_time"]
         telegram_id = attrs["telegram_id"]
 
-        booking_datetime = datetime.combine(date, time)
+        booking_datetime = datetime.combine(booking_date, booking_time)
 
         if timezone.is_naive(booking_datetime):
             booking_datetime = timezone.make_aware(
@@ -105,7 +105,7 @@ class BookingSerializer(serializers.ModelSerializer):
         new_end = new_start + service.duration
 
         active_bookings = Booking.objects.filter(
-            date=date,
+            booking_date=booking_date,
             status__in=[
                 Booking.Status.PENDING,
                 Booking.Status.CONFIRMED,
@@ -113,7 +113,10 @@ class BookingSerializer(serializers.ModelSerializer):
         )
 
         for booking in active_bookings:
-            existing_start = datetime.combine(booking.date, booking.time)
+            existing_start = datetime.combine(
+                booking.booking_date,
+                booking.booking_time
+            )
 
             if timezone.is_naive(existing_start):
                 existing_start = timezone.make_aware(
