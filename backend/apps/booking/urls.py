@@ -8,6 +8,7 @@ from .views import (
     my_booking,
     cancel_booking,
     master_schedule_view,
+    barber_analytics_view,
     confirm_booking_view,
     cancel_booking_view,
     edit_booking_view,
@@ -26,6 +27,12 @@ urlpatterns = [
         "master/schedule/",
         master_schedule_view,
         name="master_schedule",
+    ),
+
+    path(
+        "master/analytics/",
+        barber_analytics_view,
+        name="barber_analytics",
     ),
 
     path(

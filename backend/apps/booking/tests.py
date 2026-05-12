@@ -1,3 +1,4 @@
+from decimal import Decimal
 from datetime import time, timedelta
 
 from django.test import Client as TestClient
@@ -71,3 +72,37 @@ class BookingApiTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_master_analytics_page_calculates_period_metrics(self):
+        self.booking.status = Booking.Status.CONFIRMED
+        self.booking.save(update_fields=["status"])
+
+        cancelled_client = Client.objects.create(
+            name="Петр",
+            phone="87007654321",
+            telegram_id=778,
+        )
+        Booking.objects.create(
+            client=cancelled_client,
+            service=self.service,
+            booking_date=self.booking.booking_date,
+            booking_time=time(14, 0),
+            status=Booking.Status.CANCELLED,
+        )
+
+        response = self.api.get(
+            "/master/analytics/",
+            {
+                "start_date": self.booking.booking_date.isoformat(),
+                "end_date": self.booking.booking_date.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        analytics = response.context["analytics"]
+        self.assertEqual(analytics["bookings_count"], 1)
+        self.assertEqual(analytics["paid_bookings_count"], 1)
+        self.assertEqual(analytics["revenue"], Decimal("5000.00"))
+        self.assertEqual(analytics["average_check"], Decimal("5000.00"))
+        self.assertEqual(analytics["clients_count"], 1)
+        self.assertEqual(analytics["top_services"][0]["name"], self.service.name)

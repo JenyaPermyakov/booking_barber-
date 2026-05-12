@@ -1,17 +1,18 @@
 from datetime import datetime, timedelta
+
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
 from .models import Booking, Client, Service
-from .serializers import BookingSerializer, ClientSerializer, ServiceSerializer
-from datetime import date
-from django.shortcuts import render
-from django.utils.dateparse import parse_date
-from django.shortcuts import redirect, get_object_or_404
 from .notifications.telegram import send_telegram_message
+from .serializers import BookingSerializer, ClientSerializer, ServiceSerializer
+from .services import get_booking_analytics
 
 def master_schedule_view(request):
     selected_date_str = request.GET.get("date")
@@ -19,7 +20,7 @@ def master_schedule_view(request):
     if selected_date_str:
         selected_date = parse_date(selected_date_str)
     else:
-        selected_date = date.today()
+        selected_date = timezone.localdate()
 
     bookings = (
         Booking.objects
@@ -34,6 +35,36 @@ def master_schedule_view(request):
     }
 
     return render(request, "booking/master_schedule.html", context)
+
+
+def barber_analytics_view(request):
+    today = timezone.localdate()
+    default_start_date = today.replace(day=1)
+
+    start_date = parse_date(request.GET.get("start_date") or "")
+    end_date = parse_date(request.GET.get("end_date") or "")
+
+    if not start_date:
+        start_date = default_start_date
+
+    if not end_date:
+        end_date = today
+
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    analytics = get_booking_analytics(
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    context = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "analytics": analytics,
+    }
+
+    return render(request, "booking/analytics.html", context)
 
 
 def confirm_booking_view(request, booking_id):

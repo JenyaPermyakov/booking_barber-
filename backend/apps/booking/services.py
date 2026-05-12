@@ -1,4 +1,8 @@
+from decimal import Decimal
 from datetime import datetime, time, timedelta
+
+from django.db.models import Count, Max, Q, Sum
+
 from apps.booking.models import Booking
 # логика создания слотов времени.
 
@@ -78,3 +82,77 @@ def get_available_slots(booking_date, service):
             available_slots.append(slot)
 
     return available_slots
+
+
+def get_booking_analytics(start_date, end_date):
+    bookings = (
+        Booking.objects
+        .filter(booking_date__range=(start_date, end_date))
+        .exclude(status=Booking.Status.CANCELLED)
+        .select_related("client", "service")
+    )
+
+    revenue_statuses = [
+        Booking.Status.CONFIRMED,
+        Booking.Status.COMPLETED,
+    ]
+
+    revenue_bookings = bookings.filter(status__in=revenue_statuses)
+    revenue = (
+        revenue_bookings.aggregate(total=Sum("service__price"))["total"]
+        or Decimal("0.00")
+    )
+    paid_bookings_count = revenue_bookings.count()
+
+    if paid_bookings_count:
+        average_check = revenue / paid_bookings_count
+    else:
+        average_check = Decimal("0.00")
+
+    top_services = []
+    for service in (
+        revenue_bookings
+        .values("service__name")
+        .annotate(
+            bookings_count=Count("id"),
+            revenue=Sum("service__price"),
+        )
+        .order_by("-revenue", "-bookings_count", "service__name")
+    ):
+        top_services.append({
+            "name": service["service__name"],
+            "bookings_count": service["bookings_count"],
+            "revenue": service["revenue"] or Decimal("0.00"),
+        })
+
+    clients = []
+    for client in (
+        bookings
+        .values("client__name", "client__phone")
+        .annotate(
+            bookings_count=Count("id"),
+            revenue=Sum(
+                "service__price",
+                filter=Q(status__in=revenue_statuses),
+            ),
+            last_booking_date=Max("booking_date"),
+        )
+        .order_by("client__name", "client__phone")
+    ):
+        clients.append({
+            "name": client["client__name"],
+            "phone": client["client__phone"],
+            "bookings_count": client["bookings_count"],
+            "revenue": client["revenue"] or Decimal("0.00"),
+            "last_booking_date": client["last_booking_date"],
+        })
+
+    return {
+        "bookings_count": bookings.count(),
+        "paid_bookings_count": paid_bookings_count,
+        "revenue": revenue,
+        "average_check": average_check,
+        "top_services": top_services,
+        "clients": clients,
+        "clients_count": len(clients),
+    }
