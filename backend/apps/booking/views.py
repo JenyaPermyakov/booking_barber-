@@ -1,15 +1,56 @@
 from datetime import datetime, timedelta
-
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
 from .models import Booking, Client, Service
 from .serializers import BookingSerializer, ClientSerializer, ServiceSerializer
+from datetime import date
+from django.shortcuts import render
+from django.utils.dateparse import parse_date
+from django.shortcuts import redirect, get_object_or_404
 
+def master_schedule_view(request):
+    selected_date_str = request.GET.get("date")
+
+    if selected_date_str:
+        selected_date = parse_date(selected_date_str)
+    else:
+        selected_date = date.today()
+
+    bookings = (
+        Booking.objects
+        .filter(booking_date=selected_date)
+        .select_related("client", "service")
+        .order_by("booking_time")
+    )
+
+    context = {
+        "selected_date": selected_date,
+        "bookings": bookings,
+    }
+
+    return render(request, "booking/master_schedule.html", context)
+
+
+def confirm_booking_view(request, booking_id):
+    booking = get_object_or_404(Booking, id=booking_id)
+
+    booking.status = "confirmed"
+    booking.save()
+
+    return redirect("master_schedule")
+
+
+def cancel_booking_view(request, booking_id):
+    booking = get_object_or_404(Booking, id=booking_id)
+
+    booking.status = "cancelled"
+    booking.save()
+
+    return redirect("master_schedule")
 
 class ServiceListAPIView(ListAPIView):
     queryset = Service.objects.all()

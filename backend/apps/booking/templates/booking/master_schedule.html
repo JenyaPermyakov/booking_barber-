@@ -1,0 +1,255 @@
+<!-- apps/booking/templates/booking/master_schedule.html -->
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Расписание мастера</title>
+
+    <!-- Bootstrap -->
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+</head>
+
+<body class="bg-light">
+
+<div class="container py-5">
+
+    <!-- Header -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+
+                <div>
+                    <h1 class="h3 mb-1">
+                        Расписание мастера
+                    </h1>
+
+                    <p class="text-muted mb-0">
+                        Управление записями клиентов
+                    </p>
+                </div>
+
+                <!-- Date Filter -->
+                <form method="get" class="d-flex gap-2">
+
+                    <input
+                        type="date"
+                        name="date"
+                        class="form-control"
+                        value="{{ selected_date|date:'Y-m-d' }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn btn-dark"
+                    >
+                        Показать
+                    </button>
+
+                </form>
+
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Schedule Card -->
+    <div class="card shadow-sm border-0">
+
+        <div class="card-body">
+
+            <div class="d-flex justify-content-between align-items-center mb-4">
+
+                <h2 class="h5 mb-0">
+                    Записи на
+                    <span class="text-primary">
+                        {{ selected_date|date:"d.m.Y" }}
+                    </span>
+                </h2>
+
+                <span class="badge bg-secondary fs-6">
+                    Всего: {{ bookings|length }}
+                </span>
+
+            </div>
+
+            {% if bookings %}
+
+                <div class="table-responsive">
+
+                    <table class="table table-hover align-middle">
+
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Время</th>
+                                <th>Статус</th>
+                                <th>Клиент</th>
+                                <th>Телефон</th>
+                                <th>Услуга</th>
+                                <th>Стоимость</th>
+                                <th width="220">Действия</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+
+                        {% for booking in bookings %}
+
+                            <tr>
+
+                                <!-- Time -->
+                                <td>
+                                    <strong>
+                                        {{ booking.booking_time|time:"H:i" }}
+                                    </strong>
+                                </td>
+
+                                <!-- Status -->
+                                <td>
+
+                                    {% if booking.status == "pending" %}
+
+                                        <span class="badge bg-warning text-dark">
+                                            Ожидает
+                                        </span>
+
+                                    {% elif booking.status == "confirmed" %}
+
+                                        <span class="badge bg-success">
+                                            Подтверждена
+                                        </span>
+
+                                    {% elif booking.status == "cancelled" %}
+
+                                        <span class="badge bg-danger">
+                                            Отменена
+                                        </span>
+
+                                    {% endif %}
+
+                                </td>
+
+                                <!-- Client -->
+                                <td>
+                                    <strong>
+                                        {{ booking.client.name }}
+                                    </strong>
+                                </td>
+
+                                <!-- Phone -->
+                                <td>
+                                    {{ booking.client.phone }}
+                                </td>
+
+                                <!-- Service -->
+                                <td>
+                                    {{ booking.service.name }}
+                                </td>
+
+                                <!-- Price -->
+                                <td>
+                                    <strong>
+                                        {{ booking.service.price }} ₸
+                                    </strong>
+                                </td>
+
+                                <!-- Actions -->
+                                <td>
+
+                                    {% if booking.status == "pending" %}
+
+                                        <div class="d-flex gap-2">
+
+                                            <!-- Confirm -->
+                                            <form
+                                                method="post"
+                                                action="{% url 'confirm_booking' booking.id %}"
+                                            >
+                                                {% csrf_token %}
+
+                                                <button
+                                                    type="submit"
+                                                    class="btn btn-success btn-sm"
+                                                >
+                                                    Подтвердить
+                                                </button>
+
+                                            </form>
+
+                                            <!-- Cancel -->
+                                            <form
+                                                method="post"
+                                                action="{% url 'cancel_booking' booking.id %}"
+                                            >
+                                                {% csrf_token %}
+
+                                                <button
+                                                    type="submit"
+                                                    class="btn btn-danger btn-sm"
+                                                >
+                                                    Отменить
+                                                </button>
+
+                                            </form>
+
+                                        </div>
+
+                                    {% elif booking.status == "confirmed" %}
+
+                                        <span class="text-success fw-semibold">
+                                            ✓ Подтверждена
+                                        </span>
+
+                                    {% elif booking.status == "cancelled" %}
+
+                                        <span class="text-danger fw-semibold">
+                                            ✕ Отменена
+                                        </span>
+
+                                    {% endif %}
+
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+            {% else %}
+
+                <div class="text-center py-5">
+
+                    <h4 class="text-muted">
+                        На выбранную дату записей нет
+                    </h4>
+
+                    <p class="text-secondary">
+                        Попробуйте выбрать другую дату
+                    </p>
+
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>

@@ -7,6 +7,9 @@ from .views import (
     create_booking,
     my_booking,
     cancel_booking,
+    master_schedule_view,
+    confirm_booking_view,
+    cancel_booking_view,
 )
 
 
@@ -17,4 +20,22 @@ urlpatterns = [
     path("my-booking/", my_booking, name="my_booking"),
     path("clients/by-telegram/", client_by_telegram, name="client_by_telegram"),
     path("bookings/<int:pk>/", cancel_booking, name="cancel_booking"),
+
+    path(
+        "master/schedule/",
+        master_schedule_view,
+        name="master_schedule",
+    ),
+
+    path(
+        "booking/<int:booking_id>/confirm/",
+        confirm_booking_view,
+        name="confirm_booking",
+    ),
+
+    path(
+        "booking/<int:booking_id>/cancel/",
+        cancel_booking_view,
+        name="cancel_booking",
+    ),
 ]
