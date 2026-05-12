@@ -10,6 +10,7 @@ from .views import (
     master_schedule_view,
     confirm_booking_view,
     cancel_booking_view,
+    edit_booking_view,
 )
 
 
@@ -37,5 +38,11 @@ urlpatterns = [
         "booking/<int:booking_id>/cancel/",
         cancel_booking_view,
         name="cancel_booking",
+    ),
+
+    path(
+        "booking/<int:booking_id>/edit/",
+        edit_booking_view,
+        name="edit_booking"
     ),
 ]

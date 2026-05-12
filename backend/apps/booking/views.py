@@ -11,6 +11,7 @@ from datetime import date
 from django.shortcuts import render
 from django.utils.dateparse import parse_date
 from django.shortcuts import redirect, get_object_or_404
+from .notifications.telegram import send_telegram_message
 
 def master_schedule_view(request):
     selected_date_str = request.GET.get("date")
@@ -41,6 +42,17 @@ def confirm_booking_view(request, booking_id):
     booking.status = "confirmed"
     booking.save()
 
+    if booking.client.telegram_id:
+        send_telegram_message(
+            chat_id=booking.client.telegram_id,
+            text=(
+                f"✅ Ваша запись подтверждена!\n\n"
+                f"Услуга: {booking.service.name}\n"
+                f"Дата: {booking.booking_date}\n"
+                f"Время: {booking.booking_time}"
+            )
+        )
+
     return redirect("master_schedule")
 
 
@@ -49,6 +61,17 @@ def cancel_booking_view(request, booking_id):
 
     booking.status = "cancelled"
     booking.save()
+
+    if booking.client.telegram_id:
+        send_telegram_message(
+            chat_id=booking.client.telegram_id,
+            text=(
+                f"❌ Ваша запись была отменена мастером.\n\n"
+                f"Услуга: {booking.service.name}\n"
+                f"Дата: {booking.booking_date}\n"
+                f"Время: {booking.booking_time}"
+            )
+        )
 
     return redirect("master_schedule")
 
@@ -255,4 +278,33 @@ def cancel_booking(request, pk):
             "detail": "Запись успешно отменена."
         },
         status=status.HTTP_200_OK
+    )
+
+def edit_booking_view(request, booking_id):
+    booking = get_object_or_404(Booking, id=booking_id)
+
+    if request.method == "POST":
+        booking.booking_date = request.POST.get("booking_date")
+        booking.booking_time = request.POST.get("booking_time")
+        booking.save()
+
+        if booking.client.telegram_id:
+            send_telegram_message(
+                chat_id=booking.client.telegram_id,
+                text=(
+                    f"🔄 Ваша запись была изменена.\n\n"
+                    f"Услуга: {booking.service.name}\n"
+                    f"Новая дата: {booking.booking_date}\n"
+                    f"Новое время: {booking.booking_time}"
+                )
+            )
+
+        return redirect("master_schedule")
+
+    return render(
+        request,
+        "booking/edit_booking.html",
+        {
+            "booking": booking
+        }
     )

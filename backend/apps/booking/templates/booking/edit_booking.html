@@ -1,0 +1,23 @@
+<h2>Изменить запись</h2>
+
+<form method="post">
+    {% csrf_token %}
+
+    <label>Дата:</label>
+    <input type="date"
+           name="booking_date"
+           value="{{ booking.booking_date }}">
+
+    <br><br>
+
+    <label>Время:</label>
+    <input type="time"
+           name="booking_time"
+           value="{{ booking.booking_time|time:'H:i' }}">
+
+    <br><br>
+
+    <button type="submit">
+        Сохранить
+    </button>
+</form>
