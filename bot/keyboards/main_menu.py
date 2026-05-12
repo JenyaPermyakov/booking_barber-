@@ -10,6 +10,12 @@ main_menu_keyboard = ReplyKeyboardMarkup(
             KeyboardButton(text="Моя запись"),
             KeyboardButton(text="Отменить запись"),
         ],
+        [
+            KeyboardButton(text="Изменить запись"),
+        ],
     ],
     resize_keyboard=True
 )
+
+
+main_keyboard = main_menu_keyboard

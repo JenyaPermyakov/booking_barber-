@@ -11,8 +11,7 @@ from bot.keyboards.booking import (
 from bot.keyboards.main_menu import main_menu_keyboard
 from bot.services.api import (
     create_booking,
-    delete_booking,
-    get_my_booking,
+    get_client_by_telegram_id,
     get_services,
     get_slots,
 )
@@ -26,22 +25,40 @@ router = Router()
 async def start_booking(message: Message, state: FSMContext):
     await state.clear()
 
+    telegram_id = message.from_user.id
+
+    client = await get_client_by_telegram_id(telegram_id)
     services = await get_services()
 
     if not services:
         await message.answer(
-            "Не удалось получить список услуг.\n"
-            "Проверьте, что Django API запущен."
+            "Сейчас список услуг недоступен. Попробуйте позже."
         )
         return
 
-    await state.set_state(BookingState.choosing_service)
+    await state.update_data(telegram_id=telegram_id)
+
+    if client:
+        await state.update_data(
+            name=client.get("name"),
+            phone=client.get("phone"),
+        )
+
+        await message.answer(
+            f"Рады снова видеть вас, {client.get('name')} 😊\n\n"
+            "Выберите услугу:",
+            reply_markup=get_services_keyboard(services)
+        )
+
+        await state.set_state(BookingState.choosing_service)
+        return
 
     await message.answer(
-        "Отлично, начинаем запись.\n\n"
         "Выберите услугу:",
-        reply_markup=get_services_keyboard(services),
+        reply_markup=get_services_keyboard(services)
     )
+
+    await state.set_state(BookingState.choosing_service)
 
 
 @router.callback_query(
@@ -91,8 +108,8 @@ async def choose_date(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingState.choosing_time)
 
     await callback.message.answer(
-        f"Дата выбрана ✅\n\n"
-        f"Выберите свободное время:",
+        "Дата выбрана ✅\n\n"
+        "Выберите свободное время:",
         reply_markup=get_slots_keyboard(slots),
     )
 
@@ -107,6 +124,27 @@ async def choose_time(callback: CallbackQuery, state: FSMContext):
     selected_time = callback.data.replace("time_", "")
 
     await state.update_data(time=selected_time)
+
+    data = await state.get_data()
+
+    # Если имя и телефон уже есть, не спрашиваем повторно
+    if data.get("name") and data.get("phone"):
+        await state.set_state(BookingState.confirming)
+
+        await callback.message.answer(
+            "Проверьте данные записи:\n\n"
+            f"Услуга ID: {data['service_id']}\n"
+            f"Дата: {data['date']}\n"
+            f"Время: {selected_time}\n"
+            f"Имя: {data['name']}\n"
+            f"Телефон: {data['phone']}\n\n"
+            "Подтвердить запись?",
+            reply_markup=get_confirm_keyboard(),
+        )
+
+        await callback.answer()
+        return
+
     await state.set_state(BookingState.entering_name)
 
     await callback.message.answer(
@@ -202,8 +240,8 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.answer(
         "Запись успешно создана ✅\n\n"
-        f"Дата: {response_data.get('booking_date')}\n"
-        f"Время: {response_data.get('booking_time')}\n\n"
+        f"Дата: {response_data.get('booking_date') or response_data.get('date')}\n"
+        f"Время: {response_data.get('booking_time') or response_data.get('time')}\n\n"
         "Ждём вас!",
         reply_markup=main_menu_keyboard,
     )
@@ -224,60 +262,3 @@ async def cancel_booking_process(callback: CallbackQuery, state: FSMContext):
     )
 
     await callback.answer()
-
-
-@router.message(F.text == "Моя запись")
-async def show_my_booking(message: Message):
-    success, booking = await get_my_booking(message.from_user.id)
-
-    if not success:
-        await message.answer(
-            "Активная запись не найдена."
-        )
-        return
-
-    service = booking.get("service")
-    client = booking.get("client")
-
-    await message.answer(
-        "Ваша активная запись:\n\n"
-        f"ID записи: {booking.get('id')}\n"
-        f"Дата: {booking.get('booking_date')}\n"
-        f"Время: {booking.get('booking_time')}\n"
-        f"Статус: {booking.get('status')}\n"
-        f"Услуга: {service}\n"
-        f"Клиент: {client}"
-    )
-
-
-@router.message(F.text == "Отменить запись")
-async def cancel_my_booking(message: Message):
-    success, booking = await get_my_booking(message.from_user.id)
-
-    if not success:
-        await message.answer(
-            "У вас нет активной записи для отмены."
-        )
-        return
-
-    booking_id = booking.get("id")
-
-    if not booking_id:
-        await message.answer(
-            "Не удалось определить ID записи."
-        )
-        return
-
-    delete_success, response_data = await delete_booking(booking_id)
-
-    if not delete_success:
-        await message.answer(
-            "Не удалось отменить запись ❌\n\n"
-            f"Ответ API:\n{response_data}"
-        )
-        return
-
-    await message.answer(
-        "Запись успешно отменена ✅",
-        reply_markup=main_menu_keyboard,
-    )

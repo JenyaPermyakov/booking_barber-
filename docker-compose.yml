@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16
+    container_name: barber_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: barber_db
+      POSTGRES_USER: barber_user
+      POSTGRES_PASSWORD: barber_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - barber_postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: barber_backend
+    restart: always
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8001:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+    depends_on:
+      - db
+
+  bot:
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    container_name: barber_bot
+    restart: always
+    volumes:
+      - ./bot:/app/bot
+    env_file:
+      - ./backend/.env
+    environment:
+      API_BASE_URL: http://backend:8000/api
+      PYTHONPATH: /app
+    depends_on:
+      - backend
+
+volumes:
+  barber_postgres_data:
