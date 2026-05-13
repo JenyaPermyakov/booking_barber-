@@ -1,14 +1,46 @@
 from decimal import Decimal
 from datetime import datetime, time, timedelta
 
+from django.utils import timezone
 from django.db.models import Count, Max, Q, Sum
 
-from apps.booking.models import Booking
+from .models import Booking
+from .notifications.telegram import send_telegram_message
+from .selectors import (
+    REVENUE_BOOKING_STATUSES,
+    get_active_bookings_for_date,
+    get_bookings_for_analytics_period,
+)
 # логика создания слотов времени.
 
 WORK_START_TIME = time(10, 0) # time start work
 WORK_END_TIME = time(20, 0) # time finish work
 SLOT_STEP = 30 # interval time
+CANCEL_MIN_HOURS_BEFORE = 2
+BOOKING_MIN_MINUTES_BEFORE = 30
+
+
+class BookingCancellationError(Exception):
+    pass
+
+
+def get_booking_datetime(booking):
+    return datetime.combine(
+        booking.booking_date,
+        booking.booking_time,
+    )
+
+
+def get_aware_datetime(booking_date, booking_time):
+    booking_datetime = datetime.combine(booking_date, booking_time)
+
+    if timezone.is_naive(booking_datetime):
+        return timezone.make_aware(
+            booking_datetime,
+            timezone.get_current_timezone(),
+        )
+
+    return booking_datetime
 
 
 def generate_working_time_slots(
@@ -33,11 +65,7 @@ def has_booking_overlap(booking_date, booking_time, duration):
     new_start = datetime.combine(booking_date, booking_time)
     new_end = new_start + duration
 
-    bookings = Booking.objects.filter(
-        booking_date=booking_date
-    ).exclude(
-        status=Booking.Status.CANCELLED
-    )
+    bookings = get_active_bookings_for_date(booking_date)
 
     for booking in bookings:
         existing_start = datetime.combine(
@@ -59,7 +87,7 @@ def is_slot_available(booking_date, booking_time, service):
         duration=service.duration,
     )
 
-def get_available_slots(booking_date, service):
+def get_available_slots(booking_date, service, min_start_datetime=None):
 
     available_slots = []
 
@@ -74,6 +102,12 @@ def get_available_slots(booking_date, service):
         if slot_end > work_end_datetime:
             continue
 
+        if min_start_datetime:
+            aware_slot_start = get_aware_datetime(booking_date, slot)
+
+            if aware_slot_start < min_start_datetime:
+                continue
+
         if is_slot_available(
             booking_date=booking_date,
             booking_time=slot,
@@ -84,20 +118,27 @@ def get_available_slots(booking_date, service):
     return available_slots
 
 
-def get_booking_analytics(start_date, end_date):
-    bookings = (
-        Booking.objects
-        .filter(booking_date__range=(start_date, end_date))
-        .exclude(status=Booking.Status.CANCELLED)
-        .select_related("client", "service")
+def get_available_slots_payload(booking_date, service):
+    min_start_datetime = timezone.localtime() + timedelta(
+        minutes=BOOKING_MIN_MINUTES_BEFORE,
     )
 
-    revenue_statuses = [
-        Booking.Status.CONFIRMED,
-        Booking.Status.COMPLETED,
+    return [
+        {
+            "time": slot.strftime("%H:%M"),
+        }
+        for slot in get_available_slots(
+            booking_date=booking_date,
+            service=service,
+            min_start_datetime=min_start_datetime,
+        )
     ]
 
-    revenue_bookings = bookings.filter(status__in=revenue_statuses)
+
+def get_booking_analytics(start_date, end_date):
+    bookings = get_bookings_for_analytics_period(start_date, end_date)
+
+    revenue_bookings = bookings.filter(status__in=REVENUE_BOOKING_STATUSES)
     revenue = (
         revenue_bookings.aggregate(total=Sum("service__price"))["total"]
         or Decimal("0.00")
@@ -133,7 +174,7 @@ def get_booking_analytics(start_date, end_date):
             bookings_count=Count("id"),
             revenue=Sum(
                 "service__price",
-                filter=Q(status__in=revenue_statuses),
+                filter=Q(status__in=REVENUE_BOOKING_STATUSES),
             ),
             last_booking_date=Max("booking_date"),
         )
@@ -156,3 +197,82 @@ def get_booking_analytics(start_date, end_date):
         "clients": clients,
         "clients_count": len(clients),
     }
+
+
+def confirm_booking(booking):
+    booking.status = Booking.Status.CONFIRMED
+    booking.save(update_fields=["status"])
+
+    if booking.client.telegram_id:
+        send_telegram_message(
+            chat_id=booking.client.telegram_id,
+            text=(
+                f"✅ Ваша запись подтверждена!\n\n"
+                f"Услуга: {booking.service.name}\n"
+                f"Дата: {booking.booking_date}\n"
+                f"Время: {booking.booking_time}"
+            )
+        )
+
+    return booking
+
+
+def cancel_booking_by_master(booking):
+    booking.status = Booking.Status.CANCELLED
+    booking.save(update_fields=["status"])
+
+    if booking.client.telegram_id:
+        send_telegram_message(
+            chat_id=booking.client.telegram_id,
+            text=(
+                f"❌ Ваша запись была отменена мастером.\n\n"
+                f"Услуга: {booking.service.name}\n"
+                f"Дата: {booking.booking_date}\n"
+                f"Время: {booking.booking_time}"
+            )
+        )
+
+    return booking
+
+
+def cancel_booking_by_client(booking):
+    if booking.status == Booking.Status.CANCELLED:
+        raise BookingCancellationError("Запись уже отменена.")
+
+    booking_datetime = get_aware_datetime(
+        booking.booking_date,
+        booking.booking_time,
+    )
+
+    min_cancel_datetime = timezone.localtime() + timedelta(
+        hours=CANCEL_MIN_HOURS_BEFORE,
+    )
+
+    if booking_datetime < min_cancel_datetime:
+        raise BookingCancellationError(
+            "Отменить запись можно минимум за 2 часа до начала."
+        )
+
+    booking.status = Booking.Status.CANCELLED
+    booking.save(update_fields=["status"])
+
+    return booking
+
+
+def update_booking_schedule(booking, booking_date, booking_time):
+    booking.booking_date = booking_date
+    booking.booking_time = booking_time
+    booking.save(update_fields=["booking_date", "booking_time"])
+
+    if booking.client.telegram_id:
+        send_telegram_message(
+            chat_id=booking.client.telegram_id,
+            text=(
+                f"🔄 Ваша запись была изменена.\n\n"
+                f"Услуга: {booking.service.name}\n"
+                f"Новая дата: {booking.booking_date}\n"
+                f"Новое время: {booking.booking_time}"
+            )
+        )
+
+    return booking

@@ -1,10 +1,12 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Client, Service, Booking
+from .selectors import client_has_active_booking
+from .services import get_aware_datetime, has_booking_overlap
 
 
 class ClientSerializer(serializers.ModelSerializer):
@@ -70,13 +72,7 @@ class BookingSerializer(serializers.ModelSerializer):
         booking_time = attrs["booking_time"]
         telegram_id = attrs["telegram_id"]
 
-        booking_datetime = datetime.combine(booking_date, booking_time)
-
-        if timezone.is_naive(booking_datetime):
-            booking_datetime = timezone.make_aware(
-                booking_datetime,
-                timezone.get_current_timezone()
-            )
+        booking_datetime = get_aware_datetime(booking_date, booking_time)
 
         now = timezone.localtime()
 
@@ -87,51 +83,16 @@ class BookingSerializer(serializers.ModelSerializer):
             )
 
         # Правило: одна активная запись на пользователя
-        active_booking_exists = Booking.objects.filter(
-            client__telegram_id=telegram_id,
-            status__in=[
-                Booking.Status.PENDING,
-                Booking.Status.CONFIRMED,
-            ]
-        ).exists()
-
-        if active_booking_exists:
+        if client_has_active_booking(telegram_id):
             raise serializers.ValidationError(
                 "У пользователя уже есть активная запись."
             )
 
         # Проверка занятости слота
-        new_start = booking_datetime
-        new_end = new_start + service.duration
-
-        active_bookings = Booking.objects.filter(
-            booking_date=booking_date,
-            status__in=[
-                Booking.Status.PENDING,
-                Booking.Status.CONFIRMED,
-            ]
-        )
-
-        for booking in active_bookings:
-            existing_start = datetime.combine(
-                booking.booking_date,
-                booking.booking_time
+        if has_booking_overlap(booking_date, booking_time, service.duration):
+            raise serializers.ValidationError(
+                "Выбранный слот уже занят."
             )
-
-            if timezone.is_naive(existing_start):
-                existing_start = timezone.make_aware(
-                    existing_start,
-                    timezone.get_current_timezone()
-                )
-
-            existing_end = existing_start + booking.service.duration
-
-            slot_is_busy = new_start < existing_end and new_end > existing_start
-
-            if slot_is_busy:
-                raise serializers.ValidationError(
-                    "Выбранный слот уже занят."
-                )
 
         return attrs
 

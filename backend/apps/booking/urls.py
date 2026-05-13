@@ -21,7 +21,7 @@ urlpatterns = [
     path("bookings/", create_booking, name="create_booking"),
     path("my-booking/", my_booking, name="my_booking"),
     path("clients/by-telegram/", client_by_telegram, name="client_by_telegram"),
-    path("bookings/<int:pk>/", cancel_booking, name="cancel_booking"),
+    path("bookings/<int:pk>/", cancel_booking, name="cancel_booking_api"),
 
     path(
         "master/schedule/",
@@ -44,7 +44,7 @@ urlpatterns = [
     path(
         "booking/<int:booking_id>/cancel/",
         cancel_booking_view,
-        name="cancel_booking",
+        name="cancel_booking_master",
     ),
 
     path(

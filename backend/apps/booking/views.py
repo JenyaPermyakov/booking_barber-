@@ -1,33 +1,37 @@
-from datetime import datetime, timedelta
-
-from django.shortcuts import get_object_or_404, redirect, render
+from django.http import Http404
+from django.shortcuts import redirect, render
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_time
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Booking, Client, Service
-from .notifications.telegram import send_telegram_message
 from .serializers import BookingSerializer, ClientSerializer, ServiceSerializer
-from .services import get_booking_analytics
+from .selectors import (
+    get_active_booking_for_telegram_id,
+    get_active_services,
+    get_booking_by_id,
+    get_client_by_telegram_id,
+    get_master_bookings_for_date,
+    get_service_by_id,
+)
+from .services import (
+    BookingCancellationError,
+    cancel_booking_by_client,
+    cancel_booking_by_master,
+    confirm_booking,
+    get_available_slots_payload,
+    get_booking_analytics,
+    update_booking_schedule,
+)
 
 def master_schedule_view(request):
     selected_date_str = request.GET.get("date")
 
-    if selected_date_str:
-        selected_date = parse_date(selected_date_str)
-    else:
-        selected_date = timezone.localdate()
-
-    bookings = (
-        Booking.objects
-        .filter(booking_date=selected_date)
-        .select_related("client", "service")
-        .order_by("booking_time")
-    )
+    selected_date = parse_date(selected_date_str or "") or timezone.localdate()
+    bookings = get_master_bookings_for_date(selected_date)
 
     context = {
         "selected_date": selected_date,
@@ -68,47 +72,31 @@ def barber_analytics_view(request):
 
 
 def confirm_booking_view(request, booking_id):
-    booking = get_object_or_404(Booking, id=booking_id)
+    booking = get_booking_by_id(booking_id)
 
-    booking.status = "confirmed"
-    booking.save()
+    if not booking:
+        raise Http404("Запись не найдена.")
 
-    if booking.client.telegram_id:
-        send_telegram_message(
-            chat_id=booking.client.telegram_id,
-            text=(
-                f"✅ Ваша запись подтверждена!\n\n"
-                f"Услуга: {booking.service.name}\n"
-                f"Дата: {booking.booking_date}\n"
-                f"Время: {booking.booking_time}"
-            )
-        )
+    confirm_booking(booking)
 
     return redirect("master_schedule")
 
 
 def cancel_booking_view(request, booking_id):
-    booking = get_object_or_404(Booking, id=booking_id)
+    booking = get_booking_by_id(booking_id)
 
-    booking.status = "cancelled"
-    booking.save()
+    if not booking:
+        raise Http404("Запись не найдена.")
 
-    if booking.client.telegram_id:
-        send_telegram_message(
-            chat_id=booking.client.telegram_id,
-            text=(
-                f"❌ Ваша запись была отменена мастером.\n\n"
-                f"Услуга: {booking.service.name}\n"
-                f"Дата: {booking.booking_date}\n"
-                f"Время: {booking.booking_time}"
-            )
-        )
+    cancel_booking_by_master(booking)
 
     return redirect("master_schedule")
 
 class ServiceListAPIView(ListAPIView):
-    queryset = Service.objects.all()
     serializer_class = ServiceSerializer
+
+    def get_queryset(self):
+        return get_active_services()
 
 
 class AvailableSlotsAPIView(APIView):
@@ -128,60 +116,31 @@ class AvailableSlotsAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            selected_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
+        selected_date = parse_date(date_str)
+
+        if not selected_date:
             return Response(
                 {"error": "Неверный формат даты. Используйте YYYY-MM-DD."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            service = Service.objects.get(id=service_id)
-        except Service.DoesNotExist:
+            service_id = int(service_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "service_id должен быть числом."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        service = get_service_by_id(service_id)
+
+        if not service:
             return Response(
                 {"error": "Услуга не найдена."},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        work_start = datetime.combine(selected_date, datetime.strptime("10:00", "%H:%M").time())
-        work_end = datetime.combine(selected_date, datetime.strptime("20:00", "%H:%M").time())
-
-        if timezone.is_naive(work_start):
-            work_start = timezone.make_aware(work_start, timezone.get_current_timezone())
-
-        if timezone.is_naive(work_end):
-            work_end = timezone.make_aware(work_end, timezone.get_current_timezone())
-
-        now = timezone.localtime()
-
-        slots = []
-        current_time = work_start
-
-        while current_time + service.duration <= work_end:
-            slot_end = current_time + service.duration
-
-            is_past = current_time < now + timedelta(minutes=30)
-
-            is_busy = Booking.objects.filter(
-                booking_date=selected_date,
-                status__in=[
-                    Booking.Status.PENDING,
-                    Booking.Status.CONFIRMED,
-                ],
-                booking_time__lt=slot_end.time(),
-            ).filter(
-                booking_time__gte=current_time.time()
-            ).exists()
-
-            if not is_past and not is_busy:
-                slots.append({
-                    "time": current_time.strftime("%H:%M")
-                })
-
-            current_time += timedelta(minutes=30)
-
-        return Response(slots)
+        return Response(get_available_slots_payload(selected_date, service))
 
 
 @api_view(["POST"])
@@ -214,13 +173,7 @@ def my_booking(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    booking = Booking.objects.filter(
-        client__telegram_id=telegram_id,
-        status__in=[
-            Booking.Status.PENDING,
-            Booking.Status.CONFIRMED,
-        ]
-    ).order_by("booking_date", "booking_time").first()
+    booking = get_active_booking_for_telegram_id(telegram_id)
 
     if not booking:
         return Response(
@@ -246,9 +199,9 @@ def client_by_telegram(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    try:
-        client = Client.objects.get(telegram_id=telegram_id)
-    except Client.DoesNotExist:
+    client = get_client_by_telegram_id(telegram_id)
+
+    if not client:
         return Response(
             {
                 "detail": "Клиент не найден."
@@ -262,9 +215,9 @@ def client_by_telegram(request):
 
 @api_view(["DELETE"])
 def cancel_booking(request, pk):
-    try:
-        booking = Booking.objects.get(pk=pk)
-    except Booking.DoesNotExist:
+    booking = get_booking_by_id(pk)
+
+    if not booking:
         return Response(
             {
                 "error": "Запись не найдена."
@@ -272,37 +225,15 @@ def cancel_booking(request, pk):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    if booking.status == Booking.Status.CANCELLED:
+    try:
+        cancel_booking_by_client(booking)
+    except BookingCancellationError as error:
         return Response(
             {
-                "error": "Запись уже отменена."
+                "error": str(error)
             },
             status=status.HTTP_400_BAD_REQUEST
         )
-
-    booking_datetime = datetime.combine(
-        booking.booking_date,
-        booking.booking_time
-    )
-
-    if timezone.is_naive(booking_datetime):
-        booking_datetime = timezone.make_aware(
-            booking_datetime,
-            timezone.get_current_timezone()
-        )
-
-    now = timezone.localtime()
-
-    if booking_datetime < now + timedelta(hours=2):
-        return Response(
-            {
-                "error": "Отменить запись можно минимум за 2 часа до начала."
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    booking.status = Booking.Status.CANCELLED
-    booking.save(update_fields=["status"])
 
     return Response(
         {
@@ -312,22 +243,20 @@ def cancel_booking(request, pk):
     )
 
 def edit_booking_view(request, booking_id):
-    booking = get_object_or_404(Booking, id=booking_id)
+    booking = get_booking_by_id(booking_id)
+
+    if not booking:
+        raise Http404("Запись не найдена.")
 
     if request.method == "POST":
-        booking.booking_date = request.POST.get("booking_date")
-        booking.booking_time = request.POST.get("booking_time")
-        booking.save()
+        booking_date = parse_date(request.POST.get("booking_date") or "")
+        booking_time = parse_time(request.POST.get("booking_time") or "")
 
-        if booking.client.telegram_id:
-            send_telegram_message(
-                chat_id=booking.client.telegram_id,
-                text=(
-                    f"🔄 Ваша запись была изменена.\n\n"
-                    f"Услуга: {booking.service.name}\n"
-                    f"Новая дата: {booking.booking_date}\n"
-                    f"Новое время: {booking.booking_time}"
-                )
+        if booking_date and booking_time:
+            update_booking_schedule(
+                booking=booking,
+                booking_date=booking_date,
+                booking_time=booking_time,
             )
 
         return redirect("master_schedule")
