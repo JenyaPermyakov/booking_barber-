@@ -19,6 +19,8 @@ propcache==0.5.2
 psycopg2-binary==2.9.12
 pydantic==2.13.4
 pydantic_core==2.46.4
+pytest==9.0.3
+pytest-django==4.12.0
 python-dotenv==1.2.2
 requests==2.34.0
 sqlparse==0.5.5

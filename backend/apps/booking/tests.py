@@ -1,7 +1,7 @@
 from decimal import Decimal
 from datetime import time, timedelta
 
-from django.test import Client as TestClient
+from django.test import Client as DjangoClient
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -11,7 +11,7 @@ from .models import Booking, Client, Service
 @override_settings(ALLOWED_HOSTS=["127.0.0.1", "testserver"])
 class BookingApiTests(TestCase):
     def setUp(self):
-        self.api = TestClient(HTTP_HOST="127.0.0.1")
+        self.api = DjangoClient(HTTP_HOST="127.0.0.1")
         self.service = Service.objects.create(
             name="Мужская стрижка",
             price="5000.00",
